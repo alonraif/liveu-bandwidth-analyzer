@@ -189,25 +189,32 @@ async def get_bandwidth_data(session_id: str):
                 "min_rtt_ms": row["min_rtt_ms"]
             })
 
-        # Overall session statistics
+        # Overall session statistics with aggregated bandwidth calculations
+        # Round to nearest second to properly aggregate concurrent modem measurements
         overall_stats = await conn.fetchrow("""
+            WITH aggregated_bandwidth AS (
+                SELECT
+                    date_trunc('second', time) as rounded_time,
+                    SUM(bandwidth_mbps) as total_bandwidth_at_time,
+                    AVG(packet_loss_percent) as avg_packet_loss_at_time,
+                    AVG(smooth_rtt_ms) as avg_rtt_at_time
+                FROM bandwidth_metrics
+                WHERE session_id = $1
+                GROUP BY date_trunc('second', time)
+            )
             SELECT
-                COUNT(DISTINCT modem_id) as modem_count,
-                COUNT(*) as total_measurements,
-                AVG(bandwidth_mbps) as avg_bandwidth,
-                MAX(bandwidth_mbps) as max_bandwidth,
-                MIN(bandwidth_mbps) as min_bandwidth,
-                SUM(bandwidth_mbps) as total_bandwidth,
-                AVG(packet_loss_percent) as avg_packet_loss,
-                MAX(packet_loss_percent) as max_packet_loss,
-                AVG(smooth_rtt_ms) as avg_rtt,
-                MIN(smooth_rtt_ms) as min_rtt,
-                MAX(smooth_rtt_ms) as max_rtt,
-                MIN(time) as session_start,
-                MAX(time) as session_end
-            FROM bandwidth_metrics
-            WHERE session_id = $1
+                (SELECT COUNT(DISTINCT modem_id) FROM bandwidth_metrics WHERE session_id = $1) as modem_count,
+                (SELECT COUNT(*) FROM bandwidth_metrics WHERE session_id = $1) as total_measurements,
+                AVG(total_bandwidth_at_time) as avg_bandwidth,
+                MAX(total_bandwidth_at_time) as max_bandwidth,
+                MIN(total_bandwidth_at_time) as min_bandwidth,
+                AVG(avg_packet_loss_at_time) as avg_packet_loss,
+                AVG(avg_rtt_at_time) as avg_rtt,
+                (SELECT MIN(time) FROM bandwidth_metrics WHERE session_id = $1) as session_start,
+                (SELECT MAX(time) FROM bandwidth_metrics WHERE session_id = $1) as session_end
+            FROM aggregated_bandwidth
         """, session_id)
+
 
         # Per-modem statistics
         modem_stats = await conn.fetch("""

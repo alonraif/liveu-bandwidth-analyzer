@@ -57,7 +57,12 @@ button:disabled {
 }
 
 .bandwidth-tab, .logmerger-tab {
-  padding: 20px 0;
+  padding: 15px 0;
+}
+
+.bandwidth-tab {
+  max-width: 1400px;
+  margin: 0 auto;
 }
 
 .logmerger-actions {
@@ -109,30 +114,35 @@ input[type="file"] {
   background: #f8f9fa;
   border: 1px solid #dee2e6;
   border-radius: 8px;
-  padding: 20px;
-  margin: 20px 0;
+  padding: 15px;
+  margin: 15px 0;
+  max-width: 800px;
 }
 
 .date-range-filter h3 {
   margin-top: 0;
+  margin-bottom: 8px;
   color: #495057;
+  font-size: 1.1em;
 }
 
 .date-range-filter p {
   color: #6c757d;
-  margin-bottom: 15px;
+  margin-bottom: 12px;
+  font-size: 0.9em;
 }
 
 .date-inputs {
   display: flex;
-  gap: 20px;
+  gap: 15px;
   flex-wrap: wrap;
-  margin-bottom: 15px;
+  margin-bottom: 12px;
 }
 
 .date-group {
-  flex: 1;
-  min-width: 250px;
+  flex: 0 1 auto;
+  min-width: 200px;
+  max-width: 220px;
 }
 
 .date-group label {
@@ -172,7 +182,9 @@ input[type="file"] {
 }
 
 .bandwidth-actions {
-  margin: 20px 0;
+  margin: 15px 0;
+  padding: 12px 0;
+  border-top: 1px solid #e9ecef;
 }
 
 .bandwidth-actions button {
@@ -197,71 +209,110 @@ input[type="file"] {
 }
 
 .analytics-dashboard {
-  margin-top: 20px;
+  margin-top: 15px;
+  display: grid;
+  gap: 20px;
+  grid-template-columns: 1fr 1fr;
+  grid-template-areas:
+    "overview performance"
+    "quality quality"
+    "modems modems"
+    "charts charts";
+}
+
+@media (max-width: 768px) {
+  .analytics-dashboard {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "overview"
+      "performance"
+      "quality"
+      "modems"
+      "charts";
+  }
 }
 
 .analytics-section {
-  margin-bottom: 30px;
-  padding: 20px;
+  padding: 15px;
   background: white;
   border-radius: 8px;
   border: 1px solid #e1e5e9;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
 
 .analytics-section h4 {
   margin-top: 0;
-  margin-bottom: 15px;
+  margin-bottom: 12px;
   color: #495057;
   border-bottom: 2px solid #e9ecef;
-  padding-bottom: 10px;
+  padding-bottom: 8px;
+  font-size: 1.1em;
 }
+
+.analytics-section:nth-child(1) { grid-area: overview; }
+.analytics-section:nth-child(2) { grid-area: performance; }
+.analytics-section:nth-child(3) { grid-area: quality; }
+.analytics-section:nth-child(4) { grid-area: modems; }
+.analytics-section:nth-child(5) { grid-area: charts; }
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 15px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
 }
 
 .stat-card {
   text-align: center;
-  padding: 15px;
+  padding: 12px;
   background: #f8f9fa;
   border-radius: 6px;
   border: 1px solid #dee2e6;
+  transition: background-color 0.2s;
+}
+
+.stat-card:hover {
+  background: #e9ecef;
 }
 
 .stat-value {
-  font-size: 1.8em;
+  font-size: 1.6em;
   font-weight: bold;
   color: #007bff;
-  margin-bottom: 5px;
+  margin-bottom: 4px;
+  line-height: 1.1;
 }
 
 .stat-label {
-  font-size: 0.9em;
+  font-size: 0.85em;
   color: #6c757d;
   font-weight: 500;
+  line-height: 1.2;
 }
 
 .modem-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 15px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
 }
 
 .modem-card {
-  padding: 15px;
+  padding: 12px;
   background: #f8f9fa;
   border-radius: 6px;
   border: 1px solid #dee2e6;
+  transition: background-color 0.2s;
+}
+
+.modem-card:hover {
+  background: #e9ecef;
 }
 
 .modem-card h5 {
   margin-top: 0;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   color: #495057;
-  font-size: 1.1em;
+  font-size: 1em;
+  font-weight: 600;
 }
 
 .modem-metrics {
@@ -273,7 +324,7 @@ input[type="file"] {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 5px 0;
+  padding: 4px 0;
   border-bottom: 1px solid #e9ecef;
 }
 
@@ -284,11 +335,13 @@ input[type="file"] {
 .metric-label {
   font-weight: 500;
   color: #6c757d;
+  font-size: 0.85em;
 }
 
 .metric-value {
   font-weight: bold;
   color: #495057;
+  font-size: 0.85em;
 }
 
 .raw-data {
@@ -347,12 +400,22 @@ details summary:hover {
 }
 
 .chart-controls {
-  text-align: center;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-top: 10px;
   padding: 10px;
   background: #f8f9fa;
   border-radius: 4px;
   border-top: 1px solid #e9ecef;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.control-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .zoom-button {
@@ -371,8 +434,254 @@ details summary:hover {
 }
 
 .zoom-help {
-  margin-left: 15px;
   font-size: 12px;
   color: #6c757d;
   font-style: italic;
+}
+
+.timezone-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #495057;
+}
+
+.timezone-select {
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  background-color: white;
+  color: #495057;
+  cursor: pointer;
+}
+
+.timezone-select:focus {
+  border-color: #007bff;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+.merged-log-viewer {
+  margin-top: 20px;
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  padding: 15px;
+}
+
+.merged-log-viewer h3 {
+  margin-top: 0;
+  margin-bottom: 15px;
+  color: #495057;
+  border-bottom: 2px solid #e9ecef;
+  padding-bottom: 8px;
+}
+
+.log-metadata {
+  background: #e9ecef;
+  padding: 10px;
+  border-radius: 4px;
+  margin-bottom: 15px;
+  font-size: 0.9em;
+}
+
+.log-metadata p {
+  margin: 5px 0;
+  color: #495057;
+}
+
+.log-content {
+  max-height: 500px;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  padding: 15px;
+}
+
+.log-viewer-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+  padding: 10px;
+  background: #e9ecef;
+  border-radius: 4px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.search-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.search-input {
+  padding: 6px 12px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 14px;
+  width: 250px;
+  max-width: 100%;
+}
+
+.search-input:focus {
+  border-color: #007bff;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+.search-navigation {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.search-info {
+  font-size: 12px;
+  color: #495057;
+  margin-right: 5px;
+}
+
+.nav-button {
+  padding: 4px 8px;
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background-color 0.2s;
+}
+
+.nav-button:hover {
+  background: #0056b3;
+}
+
+.nav-button:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.viewer-options {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 14px;
+  color: #495057;
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  margin: 0;
+}
+
+.copy-button {
+  padding: 6px 12px;
+  background: #28a745;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+.copy-button:hover {
+  background: #218838;
+}
+
+.log-lines {
+  font-family: 'Courier New', Monaco, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #212529;
+}
+
+.log-line {
+  display: flex;
+  min-height: 18px;
+  border-bottom: 1px solid #f1f3f4;
+}
+
+.log-line:hover {
+  background-color: #f8f9fa;
+}
+
+.log-line.current-line {
+  background-color: #fff3cd !important;
+  border-left: 3px solid #007bff;
+}
+
+.line-number {
+  display: inline-block;
+  width: 50px;
+  padding: 0 8px;
+  background: #f8f9fa;
+  border-right: 1px solid #dee2e6;
+  color: #6c757d;
+  text-align: right;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.line-content {
+  padding: 0 8px;
+  flex: 1;
+}
+
+.wrap-text .line-content {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.no-wrap .line-content {
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.search-match {
+  background-color: #ffeb3b;
+  padding: 1px 2px;
+  border-radius: 2px;
+}
+
+.current-match {
+  background-color: #ff9800;
+  color: white;
+  padding: 1px 2px;
+  border-radius: 2px;
+  font-weight: bold;
+}
+
+@media (max-width: 768px) {
+  .log-viewer-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .search-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .search-input {
+    width: 100%;
+  }
+
+  .viewer-options {
+    justify-content: space-between;
+  }
+
+  .line-number {
+    width: 40px;
+  }
 }

@@ -1,8 +1,73 @@
 import React, { useEffect, useRef } from 'react';
 
+// Chart.js plugins are registered in index.html
+
+// Helper function to convert UTC timestamp to target timezone
+const convertTimezone = (utcTimestamp, targetTimezone) => {
+  try {
+    // Parse the original timestamp (which is in UTC)
+    const originalDate = new Date(utcTimestamp);
+
+    if (isNaN(originalDate.getTime())) {
+      console.warn('Invalid timestamp:', utcTimestamp);
+      return new Date();
+    }
+
+    if (targetTimezone === 'UTC') {
+      // For UTC, we need to create a date that displays the UTC time values
+      // but in local context so Chart.js doesn't convert it again
+      const utcYear = originalDate.getUTCFullYear();
+      const utcMonth = originalDate.getUTCMonth();
+      const utcDate = originalDate.getUTCDate();
+      const utcHours = originalDate.getUTCHours();
+      const utcMinutes = originalDate.getUTCMinutes();
+      const utcSeconds = originalDate.getUTCSeconds();
+      const utcMs = originalDate.getUTCMilliseconds();
+
+      const localizedUTC = new Date(utcYear, utcMonth, utcDate, utcHours, utcMinutes, utcSeconds, utcMs);
+      console.log('UTC conversion:', utcTimestamp, '-> local representation:', localizedUTC);
+      return localizedUTC;
+    }
+
+    // For other timezones, convert from UTC to target timezone
+    const targetFormatter = new Intl.DateTimeFormat('sv-SE', { // ISO format
+      timeZone: targetTimezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+
+    const targetTimeString = targetFormatter.format(originalDate);
+    const targetDate = new Date(targetTimeString);
+
+    console.log('Timezone conversion:', utcTimestamp, 'UTC ->', targetTimeString, targetTimezone);
+    return targetDate;
+  } catch (error) {
+    console.warn('Timezone conversion failed:', error, 'for timestamp:', utcTimestamp);
+    return new Date(utcTimestamp);
+  }
+};
+
 const ModemColors = [
   '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40',
   '#FF6384', '#C9CBCF', '#4BC0C0', '#FF6384', '#36A2EB', '#FFCE56'
+];
+
+// Timezone options
+const TIMEZONE_OPTIONS = [
+  { value: 'UTC', label: 'UTC' },
+  { value: 'America/New_York', label: 'Eastern Time' },
+  { value: 'America/Chicago', label: 'Central Time' },
+  { value: 'America/Denver', label: 'Mountain Time' },
+  { value: 'America/Los_Angeles', label: 'Pacific Time' },
+  { value: 'Europe/London', label: 'London Time' },
+  { value: 'Europe/Paris', label: 'Central European Time' },
+  { value: 'Asia/Tokyo', label: 'Japan Time' },
+  { value: 'Asia/Shanghai', label: 'China Time' },
+  { value: 'Australia/Sydney', label: 'Australian Eastern Time' }
 ];
 
 // Common zoom configuration for all charts
@@ -15,31 +80,20 @@ const getZoomConfig = () => ({
     pinch: {
       enabled: true
     },
-    mode: 'xy',
-    scaleMode: 'xy',
-    onZoomComplete: function({chart}) {
-      // Force tick regeneration for better time labels
-      chart.update('none');
-    }
+    drag: {
+      enabled: true,
+      modifierKey: 'shift'
+    },
+    mode: 'xy'
   },
   pan: {
     enabled: true,
-    mode: 'xy',
-    scaleMode: 'xy',
-    threshold: 10,
-    modifierKey: null,
-    onPanComplete: function({chart}) {
-      // Force tick regeneration for better time labels
-      chart.update('none');
-    }
-  },
-  limits: {
-    y: {min: 0, max: 'original'}
+    mode: 'xy'
   }
 });
 
-// Zoom control buttons component
-function ZoomControls({ chartRef }) {
+// Chart controls component with zoom and timezone
+function ChartControls({ chartRef, timezone, onTimezoneChange }) {
   const resetZoom = () => {
     if (chartRef.current) {
       chartRef.current.resetZoom();
@@ -48,17 +102,36 @@ function ZoomControls({ chartRef }) {
 
   return (
     <div className="chart-controls">
-      <button onClick={resetZoom} className="zoom-button">
-        Reset Zoom
-      </button>
-      <span className="zoom-help">
-        💡 Mouse wheel to zoom, click and drag to pan
-      </span>
+      <div className="control-group">
+        <button onClick={resetZoom} className="zoom-button">
+          Reset Zoom
+        </button>
+        <span className="zoom-help">
+          💡 Mouse wheel to zoom, drag to pan, Shift+drag to zoom box
+        </span>
+      </div>
+      <div className="control-group">
+        <label htmlFor="timezone-select" className="timezone-label">
+          Timezone:
+        </label>
+        <select
+          id="timezone-select"
+          value={timezone}
+          onChange={(e) => onTimezoneChange(e.target.value)}
+          className="timezone-select"
+        >
+          {TIMEZONE_OPTIONS.map(option => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </div>
     </div>
   );
 }
 
-function BandwidthChart({ data, title }) {
+function BandwidthChart({ data, title, timezone = 'UTC', onTimezoneChange }) {
   const chartRef = useRef(null);
   const chartInstance = useRef(null);
 
@@ -79,7 +152,7 @@ function BandwidthChart({ data, title }) {
         modemData[point.modem_id] = [];
       }
       modemData[point.modem_id].push({
-        x: new Date(point.time),
+        x: convertTimezone(point.time, timezone),
         y: point.bandwidth_mbps
       });
     });
@@ -132,7 +205,7 @@ function BandwidthChart({ data, title }) {
             },
             title: {
               display: true,
-              text: 'Time'
+              text: `Time (${timezone === 'UTC' ? 'UTC' : TIMEZONE_OPTIONS.find(tz => tz.value === timezone)?.label || timezone})`
             },
             ticks: {
               source: 'auto',
@@ -160,19 +233,19 @@ function BandwidthChart({ data, title }) {
         chartInstance.current.destroy();
       }
     };
-  }, [data, title]);
+  }, [data, title, timezone]);
 
   return (
     <div style={{ position: 'relative', width: '100%' }}>
       <div style={{ height: '400px' }}>
         <canvas ref={chartRef}></canvas>
       </div>
-      <ZoomControls chartRef={chartInstance} />
+      <ChartControls chartRef={chartInstance} timezone={timezone} onTimezoneChange={onTimezoneChange} />
     </div>
   );
 }
 
-function AggregatedBandwidthChart({ data }) {
+function AggregatedBandwidthChart({ data, timezone = 'UTC', onTimezoneChange }) {
   const chartRef = useRef(null);
   const chartInstance = useRef(null);
 
@@ -189,10 +262,10 @@ function AggregatedBandwidthChart({ data }) {
     // Group by time (rounded to nearest second) and sum bandwidth
     const timeGroups = {};
     data.forEach(point => {
-      const originalTime = new Date(point.time);
+      const convertedTime = convertTimezone(point.time, timezone);
       // Round to nearest second to group closely-timed measurements
-      const roundedTime = new Date(originalTime.getFullYear(), originalTime.getMonth(), originalTime.getDate(),
-                                   originalTime.getHours(), originalTime.getMinutes(), originalTime.getSeconds());
+      const roundedTime = new Date(convertedTime.getFullYear(), convertedTime.getMonth(), convertedTime.getDate(),
+                                   convertedTime.getHours(), convertedTime.getMinutes(), convertedTime.getSeconds());
       const timeKey = roundedTime.getTime();
 
       if (!timeGroups[timeKey]) {
@@ -254,7 +327,7 @@ function AggregatedBandwidthChart({ data }) {
             },
             title: {
               display: true,
-              text: 'Time'
+              text: `Time (${timezone === 'UTC' ? 'UTC' : TIMEZONE_OPTIONS.find(tz => tz.value === timezone)?.label || timezone})`
             },
             ticks: {
               source: 'auto',
@@ -282,19 +355,19 @@ function AggregatedBandwidthChart({ data }) {
         chartInstance.current.destroy();
       }
     };
-  }, [data]);
+  }, [data, timezone]);
 
   return (
     <div style={{ position: 'relative', width: '100%' }}>
       <div style={{ height: '400px' }}>
         <canvas ref={chartRef}></canvas>
       </div>
-      <ZoomControls chartRef={chartInstance} />
+      <ChartControls chartRef={chartInstance} timezone={timezone} onTimezoneChange={onTimezoneChange} />
     </div>
   );
 }
 
-function RTTChart({ data }) {
+function RTTChart({ data, timezone = 'UTC', onTimezoneChange }) {
   const chartRef = useRef(null);
   const chartInstance = useRef(null);
 
@@ -315,7 +388,7 @@ function RTTChart({ data }) {
         modemData[point.modem_id] = [];
       }
       modemData[point.modem_id].push({
-        x: new Date(point.time),
+        x: convertTimezone(point.time, timezone),
         y: point.smooth_rtt_ms
       });
     });
@@ -368,7 +441,7 @@ function RTTChart({ data }) {
             },
             title: {
               display: true,
-              text: 'Time'
+              text: `Time (${timezone === 'UTC' ? 'UTC' : TIMEZONE_OPTIONS.find(tz => tz.value === timezone)?.label || timezone})`
             },
             ticks: {
               source: 'auto',
@@ -396,19 +469,19 @@ function RTTChart({ data }) {
         chartInstance.current.destroy();
       }
     };
-  }, [data]);
+  }, [data, timezone]);
 
   return (
     <div style={{ position: 'relative', width: '100%' }}>
       <div style={{ height: '400px' }}>
         <canvas ref={chartRef}></canvas>
       </div>
-      <ZoomControls chartRef={chartInstance} />
+      <ChartControls chartRef={chartInstance} timezone={timezone} onTimezoneChange={onTimezoneChange} />
     </div>
   );
 }
 
-function PacketLossChart({ data }) {
+function PacketLossChart({ data, timezone = 'UTC', onTimezoneChange }) {
   const chartRef = useRef(null);
   const chartInstance = useRef(null);
 
@@ -429,7 +502,7 @@ function PacketLossChart({ data }) {
         modemData[point.modem_id] = [];
       }
       modemData[point.modem_id].push({
-        x: new Date(point.time),
+        x: convertTimezone(point.time, timezone),
         y: point.packet_loss_percent
       });
     });
@@ -482,7 +555,7 @@ function PacketLossChart({ data }) {
             },
             title: {
               display: true,
-              text: 'Time'
+              text: `Time (${timezone === 'UTC' ? 'UTC' : TIMEZONE_OPTIONS.find(tz => tz.value === timezone)?.label || timezone})`
             },
             ticks: {
               source: 'auto',
@@ -511,14 +584,14 @@ function PacketLossChart({ data }) {
         chartInstance.current.destroy();
       }
     };
-  }, [data]);
+  }, [data, timezone]);
 
   return (
     <div style={{ position: 'relative', width: '100%' }}>
       <div style={{ height: '400px' }}>
         <canvas ref={chartRef}></canvas>
       </div>
-      <ZoomControls chartRef={chartInstance} />
+      <ChartControls chartRef={chartInstance} timezone={timezone} onTimezoneChange={onTimezoneChange} />
     </div>
   );
 }
