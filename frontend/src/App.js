@@ -3,6 +3,9 @@ import './App.css';
 import { BandwidthChart, AggregatedBandwidthChart, RTTChart, PacketLossChart } from './Charts';
 import Login from './Login';
 import UserManagement from './UserManagement';
+import VirtualLogViewer from './VirtualLogViewer';
+import PaginatedLogViewer from './PaginatedLogViewer';
+import SessionAnalyzer from './SessionAnalyzer';
 
 function App() {
   // Authentication state
@@ -22,6 +25,9 @@ function App() {
   const [showLineNumbers, setShowLineNumbers] = useState(true);
   const [wrapText, setWrapText] = useState(true);
   const [activeTab, setActiveTab] = useState('bandwidth');
+  const [usePagination, setUsePagination] = useState(false);
+  const [logViewerMode, setLogViewerMode] = useState('auto'); // 'auto', 'virtual', 'paginated'
+  const [isLoadingViewer, setIsLoadingViewer] = useState(false);
   const [dateRange, setDateRange] = useState({
     startDate: '',
     endDate: '',
@@ -198,21 +204,65 @@ function App() {
   const viewMergedLogs = async () => {
     if (!logMergerFile) return;
 
-    const formData = new FormData();
-    formData.append('file', logMergerFile);
+    setIsLoadingViewer(true);
 
-    // Add date range parameters if provided
-    if (dateRange.startDate || dateRange.startTime) {
-      const startDateTime = `${dateRange.startDate} ${dateRange.startTime || '00:00:00'}`;
-      formData.append('start_datetime', startDateTime);
+    // For large files, skip loading content and go straight to pagination
+    const fileSizeMB = logMergerFile.size / (1024 * 1024);
+
+    if (fileSizeMB > 10 || logViewerMode === 'paginated') {
+      // Skip content loading for large files, let PaginatedLogViewer handle it
+      setMergedLogContent('LARGE_FILE_PLACEHOLDER');
+      setMergedLogMetadata({ total_lines: 'Loading...', files_processed: 'Loading...' });
+      setIsLoadingViewer(false);
+      return;
     }
 
-    if (dateRange.endDate || dateRange.endTime) {
-      const endDateTime = `${dateRange.endDate} ${dateRange.endTime || '23:59:59'}`;
-      formData.append('end_datetime', endDateTime);
-    }
-
+    // For smaller files, first check actual content size
     try {
+      const testFormData = new FormData();
+      testFormData.append('file', logMergerFile);
+      testFormData.append('page', '1');
+      testFormData.append('lines_per_page', '100');
+
+      if (dateRange.startDate || dateRange.startTime) {
+        const startDateTime = `${dateRange.startDate} ${dateRange.startTime || '00:00:00'}`;
+        testFormData.append('start_datetime', startDateTime);
+      }
+      if (dateRange.endDate || dateRange.endTime) {
+        const endDateTime = `${dateRange.endDate} ${dateRange.endTime || '23:59:59'}`;
+        testFormData.append('end_datetime', endDateTime);
+      }
+
+      const testRes = await makeAuthenticatedRequest('/api/logs/chunked-content', {
+        method: 'POST',
+        body: testFormData
+      });
+
+      if (testRes.ok) {
+        const testData = await testRes.json();
+
+        // If file has >5000 lines, use pagination instead
+        if (testData.total_lines > 5000) {
+          setMergedLogContent('LARGE_FILE_PLACEHOLDER');
+          setMergedLogMetadata(testData.metadata || {});
+          setIsLoadingViewer(false);
+          return;
+        }
+      }
+
+      // For smaller files, load the full content
+      const formData = new FormData();
+      formData.append('file', logMergerFile);
+
+      if (dateRange.startDate || dateRange.startTime) {
+        const startDateTime = `${dateRange.startDate} ${dateRange.startTime || '00:00:00'}`;
+        formData.append('start_datetime', startDateTime);
+      }
+      if (dateRange.endDate || dateRange.endTime) {
+        const endDateTime = `${dateRange.endDate} ${dateRange.endTime || '23:59:59'}`;
+        formData.append('end_datetime', endDateTime);
+      }
+
       const res = await makeAuthenticatedRequest('/api/merge-logs/download', {
         method: 'POST',
         body: formData
@@ -226,6 +276,8 @@ function App() {
       }
     } catch (err) {
       console.error(err);
+    } finally {
+      setIsLoadingViewer(false);
     }
   };
 
@@ -253,6 +305,32 @@ function App() {
     });
     setSearchResults(results);
     setCurrentSearchIndex(results.length > 0 ? 0 : -1);
+  };
+
+  // Determine optimal viewer mode based on content size
+  const determineViewerMode = (content, metadata) => {
+    if (logViewerMode !== 'auto') return logViewerMode;
+
+    // If content is placeholder for large file, use pagination
+    if (content === 'LARGE_FILE_PLACEHOLDER') {
+      return 'paginated';
+    }
+
+    const lines = content ? content.split('\n').length : 0;
+    const contentSize = content ? content.length : 0;
+
+    // Use pagination for very large files (>50k lines or >5MB)
+    if (lines > 50000 || contentSize > 5 * 1024 * 1024) {
+      return 'paginated';
+    }
+    // Use virtual scrolling for medium files (>5k lines or >500KB)
+    else if (lines > 5000 || contentSize > 500 * 1024) {
+      return 'virtual';
+    }
+    // Use regular display for small files
+    else {
+      return 'regular';
+    }
   };
 
   const navigateSearch = (direction) => {
@@ -314,6 +392,55 @@ function App() {
     });
   };
 
+  // Fast streaming download for large files
+  const downloadMergedLogsStream = async () => {
+    if (!logMergerFile) return;
+
+    try {
+      const formData = new FormData();
+      formData.append('file', logMergerFile);
+
+      if (dateRange.startDate && dateRange.startTime) {
+        formData.append('start_datetime', `${dateRange.startDate} ${dateRange.startTime}`);
+      }
+      if (dateRange.endDate && dateRange.endTime) {
+        formData.append('end_datetime', `${dateRange.endDate} ${dateRange.endTime}`);
+      }
+
+      // Create a temporary link and trigger download
+      const response = await fetch('/api/logs/stream-download', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Download failed: ${response.statusText}`);
+      }
+
+      // Create blob and download
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+
+      const filename = response.headers.get('content-disposition')?.match(/filename=(.+)/)?.[1] ||
+                      `merged_messages_${logMergerFile.name.replace(/\.(tar\.bz2|bz2|tar)$/, '')}.txt`;
+
+      link.download = filename.replace(/"/g, '');
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+    } catch (error) {
+      console.error('Download failed:', error);
+      alert(`Download failed: ${error.message}`);
+    }
+  };
+
   const downloadMergedLogs = async () => {
     if (!logMergerFile) return;
 
@@ -373,7 +500,7 @@ function App() {
   return (
     <div className="App">
       <div className="app-header">
-        <h1>LiveU Bandwidth Analyzer</h1>
+        <h1>NGL - Next Gen LULA</h1>
         <div className="user-info">
           <span className="welcome-text">Welcome, {user?.username}</span>
           <span className={`role-badge ${user?.role}`}>{user?.role}</span>
@@ -395,6 +522,12 @@ function App() {
           className={activeTab === 'logmerger' ? 'active' : ''}
         >
           Log Merger
+        </button>
+        <button
+          onClick={() => setActiveTab('sessions')}
+          className={activeTab === 'sessions' ? 'active' : ''}
+        >
+          Session Information
         </button>
         {user?.role === 'administrator' && (
           <button
@@ -679,9 +812,9 @@ function App() {
 
             <button
               onClick={viewMergedLogs}
-              disabled={!logMergerFile || mergeStatus !== 'completed'}
+              disabled={!logMergerFile || mergeStatus !== 'completed' || isLoadingViewer}
             >
-              View Logs
+              {isLoadingViewer ? 'Loading Viewer...' : 'View Logs'}
             </button>
 
             <button
@@ -773,6 +906,21 @@ function App() {
                     />
                     Wrap Text
                   </label>
+
+                  <label className="checkbox-label">
+                    Viewer Mode:
+                    <select
+                      value={logViewerMode}
+                      onChange={(e) => setLogViewerMode(e.target.value)}
+                      className="viewer-mode-select"
+                    >
+                      <option value="auto">Auto</option>
+                      <option value="regular">Regular</option>
+                      <option value="virtual">Virtual Scroll</option>
+                      <option value="paginated">Paginated</option>
+                    </select>
+                  </label>
+
                   <button
                     onClick={copyToClipboard}
                     className="copy-button"
@@ -780,17 +928,66 @@ function App() {
                   >
                     📋 Copy
                   </button>
+
+                  <button
+                    onClick={downloadMergedLogsStream}
+                    className="download-button"
+                    title="Fast download (streaming)"
+                  >
+                    ⚡ Fast Download
+                  </button>
                 </div>
               </div>
 
-              <div className={`log-content ${wrapText ? 'wrap-text' : 'no-wrap'}`}>
-                <div className="log-lines">
-                  {renderLogContent()}
+              {isLoadingViewer ? (
+                <div className="loading-indicator" style={{ padding: '40px', textAlign: 'center' }}>
+                  <div>⏳ Analyzing file size and preparing optimal viewer...</div>
                 </div>
-              </div>
+              ) : (() => {
+                const viewerMode = determineViewerMode(mergedLogContent, mergedLogMetadata);
+
+                if (viewerMode === 'paginated') {
+                  return (
+                    <PaginatedLogViewer
+                      file={logMergerFile}
+                      dateRange={dateRange}
+                      searchTerm={searchTerm}
+                      showLineNumbers={showLineNumbers}
+                      wrapText={wrapText}
+                      token={token}
+                      onMetadataUpdate={(metadata) => setMergedLogMetadata(metadata)}
+                    />
+                  );
+                } else if (viewerMode === 'virtual') {
+                  return (
+                    <VirtualLogViewer
+                      logContent={mergedLogContent}
+                      searchTerm={searchTerm}
+                      searchResults={searchResults}
+                      currentSearchIndex={currentSearchIndex}
+                      showLineNumbers={showLineNumbers}
+                      wrapText={wrapText}
+                      onSearch={handleSearch}
+                    />
+                  );
+                } else {
+                  // Regular viewer for small files
+                  return (
+                    <div className={`log-content ${wrapText ? 'wrap-text' : 'no-wrap'}`}>
+                      <div className="log-lines">
+                        {renderLogContent()}
+                      </div>
+                    </div>
+                  );
+                }
+              })()}
             </div>
           )}
         </div>
+      )}
+
+      {activeTab === 'sessions' && (
+        <SessionAnalyzer token={token} />
       )}
 
       {activeTab === 'users' && user?.role === 'administrator' && (

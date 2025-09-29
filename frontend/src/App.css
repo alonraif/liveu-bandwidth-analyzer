@@ -645,7 +645,7 @@ details summary:hover {
   margin: 0;
 }
 
-.copy-button {
+.copy-button, .download-button {
   padding: 6px 12px;
   background: #28a745;
   color: white;
@@ -654,10 +654,28 @@ details summary:hover {
   cursor: pointer;
   font-size: 14px;
   transition: background-color 0.2s;
+  margin-left: 8px;
 }
 
-.copy-button:hover {
+.copy-button:hover, .download-button:hover {
   background: #218838;
+}
+
+.download-button {
+  background: #007bff;
+}
+
+.download-button:hover {
+  background: #0056b3;
+}
+
+.viewer-mode-select {
+  margin-left: 8px;
+  padding: 4px 8px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 14px;
+  background: white;
 }
 
 .log-lines {

@@ -1,5 +1,5 @@
 """
-Log Merger Utility for LiveU Bandwidth Analyzer
+Log Merger Utility for NGL - Next Gen LULA
 Extracts and merges messages.log files in chronological order
 """
 

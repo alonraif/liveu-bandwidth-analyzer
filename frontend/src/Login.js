@@ -52,7 +52,7 @@ function Login({ onLogin }) {
     <div className="login-container">
       <div className="login-box">
         <div className="login-header">
-          <h1>LiveU Bandwidth Analyzer</h1>
+          <h1>NGL - Next Gen LULA</h1>
           <p>Please sign in to continue</p>
         </div>
 

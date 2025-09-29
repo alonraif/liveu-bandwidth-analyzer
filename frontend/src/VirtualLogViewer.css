@@ -1,0 +1,72 @@
+.virtual-log-viewer {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 4px;
+  position: relative;
+  overflow: auto;
+}
+
+.virtual-log-line {
+  padding: 2px 8px;
+  border-bottom: 1px solid #f0f0f0;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 20px;
+  background: white;
+}
+
+.virtual-log-line:hover {
+  background: #f8f9fa;
+}
+
+.virtual-log-line.current-line {
+  background: #e3f2fd;
+  border: 1px solid #2196f3;
+}
+
+.line-number {
+  color: #666;
+  user-select: none;
+  background: #f5f5f5;
+  padding: 0 8px;
+  border-right: 1px solid #ddd;
+  display: inline-block;
+  text-align: right;
+  min-width: 60px;
+}
+
+.line-content {
+  padding-left: 10px;
+  word-break: break-all;
+}
+
+.search-match {
+  background: #fff3cd;
+  padding: 1px 2px;
+  border-radius: 2px;
+}
+
+.current-match {
+  background: #ffc107;
+  padding: 1px 2px;
+  border-radius: 2px;
+  font-weight: bold;
+}
+
+.virtual-log-viewer::-webkit-scrollbar {
+  width: 12px;
+}
+
+.virtual-log-viewer::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 6px;
+}
+
+.virtual-log-viewer::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 6px;
+}
+
+.virtual-log-viewer::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}

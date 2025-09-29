@@ -1,4 +1,4 @@
-# LiveU Bandwidth Analyzer MVP
+# NGL - Next Gen LULA
 
 ## Overview
 Cloud-based, dockerized log parsing platform for LiveU support staff.

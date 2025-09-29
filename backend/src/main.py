@@ -1,6 +1,6 @@
 from fastapi import FastAPI, UploadFile, HTTPException, Form, Depends, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import asyncpg
 import redis
@@ -31,7 +31,7 @@ except ImportError:
         ACCESS_TOKEN_EXPIRE_MINUTES, cleanup_expired_sessions
     )
 
-app = FastAPI(title="LiveU Bandwidth Analyzer API")
+app = FastAPI(title="NGL - Next Gen LULA API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -96,7 +96,7 @@ async def startup():
 
 @app.get("/")
 async def root():
-    return {"message": "LiveU Bandwidth Analyzer API", "version": "1.0.0"}
+    return {"message": "NGL - Next Gen LULA API", "version": "1.0.0"}
 
 # Authentication endpoints
 @app.post("/api/auth/login", response_model=Token)
@@ -552,3 +552,153 @@ async def download_merged_logs(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error processing logs: {str(e)}")
+
+@app.post("/api/logs/stream-download")
+async def stream_download_merged_logs(
+    file: UploadFile,
+    start_datetime: Optional[str] = Form(None),
+    end_datetime: Optional[str] = Form(None),
+    current_user=Depends(get_auth_dependency)
+):
+    """Stream download merged messages.log files for better performance with large files"""
+    if not file.filename.endswith(('.tar.bz2', '.bz2', '.tar')):
+        raise HTTPException(status_code=400, detail="Invalid file format. Expected .tar.bz2, .bz2, or .tar")
+
+    async def generate_content():
+        temp_file_path = None
+        try:
+            # Save uploaded file to temporary location
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{file.filename}") as temp_file:
+                content = await file.read()
+                temp_file.write(content)
+                temp_file_path = temp_file.name
+
+            # Process the logs with date range filtering
+            result = merge_messages_logs(temp_file_path, start_datetime, end_datetime)
+
+            if not result["success"]:
+                yield f"Error: {result['error']}"
+                return
+
+            # Stream content in chunks to avoid memory issues
+            content = result["content"]
+            chunk_size = 8192  # 8KB chunks
+
+            for i in range(0, len(content), chunk_size):
+                yield content[i:i + chunk_size]
+
+        except Exception as e:
+            yield f"Error processing logs: {str(e)}"
+        finally:
+            # Clean up temp file
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
+
+    filename = f"merged_messages_{file.filename.replace('.tar.bz2', '').replace('.bz2', '').replace('.tar', '')}.txt"
+
+    return StreamingResponse(
+        generate_content(),
+        media_type="text/plain",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+        }
+    )
+
+@app.post("/api/logs/chunked-content")
+async def get_chunked_log_content(
+    file: UploadFile,
+    start_datetime: Optional[str] = Form(None),
+    end_datetime: Optional[str] = Form(None),
+    page: int = Form(1),
+    lines_per_page: int = Form(1000),
+    current_user=Depends(get_auth_dependency)
+):
+    """Get log content in chunks/pages for better browser performance"""
+    if not file.filename.endswith(('.tar.bz2', '.bz2', '.tar')):
+        raise HTTPException(status_code=400, detail="Invalid file format. Expected .tar.bz2, .bz2, or .tar")
+
+    temp_file_path = None
+    try:
+        # Save uploaded file to temporary location
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{file.filename}") as temp_file:
+            content = await file.read()
+            temp_file.write(content)
+            temp_file_path = temp_file.name
+
+        # Process the logs with date range filtering
+        result = merge_messages_logs(temp_file_path, start_datetime, end_datetime)
+
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result["error"])
+
+        # Split content into lines
+        lines = result["content"].split('\n')
+        total_lines = len(lines)
+
+        # Calculate pagination
+        start_index = (page - 1) * lines_per_page
+        end_index = min(start_index + lines_per_page, total_lines)
+
+        # Get chunk of lines
+        chunk_lines = lines[start_index:end_index]
+
+        return {
+            "content": '\n'.join(chunk_lines),
+            "page": page,
+            "lines_per_page": lines_per_page,
+            "total_lines": total_lines,
+            "total_pages": (total_lines + lines_per_page - 1) // lines_per_page,
+            "start_line": start_index + 1,
+            "end_line": end_index,
+            "metadata": result.get("metadata", {})
+        }
+
+    except Exception as e:
+        print(f"Error getting chunked log content: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error processing logs: {str(e)}")
+    finally:
+        # Clean up temp file
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.unlink(temp_file_path)
+
+@app.post("/api/analyze-sessions")
+async def analyze_session_file(
+    file: UploadFile,
+    start_datetime: str = Form(None),
+    end_datetime: str = Form(None),
+    current_user=Depends(get_auth_dependency)
+):
+    """Analyze log file for session information and streaming details"""
+    if not file.filename.endswith(('.tar.bz2', '.bz2', '.tar', '.log', '.txt')):
+        raise HTTPException(status_code=400, detail="Invalid file format. Expected .tar.bz2, .bz2, .tar, .log, or .txt")
+
+    temp_file_path = None
+    try:
+        # Save uploaded file to temporary location
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{file.filename}") as temp_file:
+            content = await file.read()
+            temp_file.write(content)
+            temp_file_path = temp_file.name
+
+        # Import and use session analyzer
+        try:
+            from .session_analyzer import SessionAnalyzer
+        except ImportError:
+            from session_analyzer import SessionAnalyzer
+
+        analyzer = SessionAnalyzer()
+        result = analyzer.analyze_file(temp_file_path, start_datetime, end_datetime)
+
+        return result
+
+    except Exception as e:
+        print(f"Error analyzing session file: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error analyzing session file: {str(e)}")
+    finally:
+        # Clean up temp file
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.unlink(temp_file_path)
