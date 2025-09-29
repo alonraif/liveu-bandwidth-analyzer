@@ -1,20 +1,35 @@
-from fastapi import FastAPI, UploadFile, HTTPException, Form
+from fastapi import FastAPI, UploadFile, HTTPException, Form, Depends, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import asyncpg
 import redis
 import json
 import uuid
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timedelta
+from typing import Optional, List
 import os
 from minio import Minio
 import io
 import tempfile
 try:
     from .log_merger import merge_messages_logs
+    from .auth import (
+        UserCreate, UserUpdate, UserResponse, LoginRequest, Token,
+        authenticate_user, create_access_token, create_user_session,
+        get_current_active_user_factory, require_admin_role_factory, get_all_users,
+        create_user, update_user, delete_user, reset_user_password,
+        ACCESS_TOKEN_EXPIRE_MINUTES, cleanup_expired_sessions
+    )
 except ImportError:
     from log_merger import merge_messages_logs
+    from auth import (
+        UserCreate, UserUpdate, UserResponse, LoginRequest, Token,
+        authenticate_user, create_access_token, create_user_session,
+        get_current_active_user_factory, require_admin_role_factory, get_all_users,
+        create_user, update_user, delete_user, reset_user_password,
+        ACCESS_TOKEN_EXPIRE_MINUTES, cleanup_expired_sessions
+    )
 
 app = FastAPI(title="LiveU Bandwidth Analyzer API")
 
@@ -35,16 +50,47 @@ minio_client = Minio(
 )
 
 db_pool = None
+get_current_active_user = None
+require_admin_role = None
+
+# Dependency functions that work at runtime
+async def get_auth_dependency(credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())):
+    if db_pool is None:
+        raise HTTPException(status_code=500, detail="Database not initialized")
+
+    # Import auth functions locally to avoid circular imports
+    try:
+        from .auth import get_current_user_factory
+    except ImportError:
+        from auth import get_current_user_factory
+    get_current_user = get_current_user_factory(db_pool)
+    current_user = await get_current_user(credentials)
+
+    if not current_user["is_active"]:
+        raise HTTPException(status_code=400, detail="Inactive user")
+    return current_user
+
+async def get_admin_dependency(current_user = Depends(get_auth_dependency)):
+    if current_user["role"] != "administrator":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions. Administrator role required."
+        )
+    return current_user
 
 @app.on_event("startup")
 async def startup():
-    global db_pool
+    global db_pool, get_current_active_user, require_admin_role
     db_pool = await asyncpg.create_pool(
         os.getenv("DATABASE_URL"),
         min_size=5,
         max_size=20
     )
-    
+
+    # Initialize auth dependencies with db_pool
+    get_current_active_user = get_current_active_user_factory(db_pool)
+    require_admin_role = require_admin_role_factory(db_pool)
+
     if not minio_client.bucket_exists("logs"):
         minio_client.make_bucket("logs")
 
@@ -52,12 +98,147 @@ async def startup():
 async def root():
     return {"message": "LiveU Bandwidth Analyzer API", "version": "1.0.0"}
 
+# Authentication endpoints
+@app.post("/api/auth/login", response_model=Token)
+async def login(request: Request, login_data: LoginRequest):
+    """Authenticate user and return access token."""
+    user = await authenticate_user(db_pool, login_data.username, login_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Create session
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent", "")
+    session_token = await create_user_session(db_pool, str(user["user_id"]), client_ip, user_agent)
+
+    # Create access token
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user["username"]}, expires_delta=access_token_expires
+    )
+
+    user_response = UserResponse(
+        user_id=str(user["user_id"]),
+        username=user["username"],
+        email=user["email"],
+        role=user["role"],
+        is_active=user["is_active"],
+        created_at=user["created_at"],
+        last_login=user["last_login"]
+    )
+
+    return Token(
+        access_token=access_token,
+        token_type="bearer",
+        user=user_response
+    )
+
+@app.post("/api/auth/logout")
+async def logout(current_user=Depends(get_auth_dependency)):
+    """Logout current user."""
+    # In a real implementation, you might want to blacklist the JWT token
+    # For now, we'll just return success
+    return {"message": "Successfully logged out"}
+
+# User management endpoints (admin only)
+@app.get("/api/users", response_model=List[UserResponse])
+async def get_users(
+    include_inactive: bool = False,
+    current_user=Depends(get_admin_dependency)
+):
+    """Get all users (admin only)."""
+    users = await get_all_users(db_pool, include_inactive)
+    return [
+        UserResponse(
+            user_id=str(user["user_id"]),
+            username=user["username"],
+            email=user["email"],
+            role=user["role"],
+            is_active=user["is_active"],
+            created_at=user["created_at"],
+            last_login=user["last_login"]
+        )
+        for user in users
+    ]
+
+@app.post("/api/users", response_model=UserResponse)
+async def create_new_user(
+    user_data: UserCreate,
+    current_user=Depends(get_admin_dependency)
+):
+    """Create a new user (admin only)."""
+    user = await create_user(db_pool, user_data, str(current_user["user_id"]))
+    return UserResponse(
+        user_id=str(user["user_id"]),
+        username=user["username"],
+        email=user["email"],
+        role=user["role"],
+        is_active=user["is_active"],
+        created_at=user["created_at"],
+        last_login=user["last_login"]
+    )
+
+@app.put("/api/users/{user_id}", response_model=UserResponse)
+async def update_existing_user(
+    user_id: str,
+    user_data: UserUpdate,
+    current_user=Depends(get_admin_dependency)
+):
+    """Update a user (admin only)."""
+    user = await update_user(db_pool, user_id, user_data)
+    return UserResponse(
+        user_id=str(user["user_id"]),
+        username=user["username"],
+        email=user["email"],
+        role=user["role"],
+        is_active=user["is_active"],
+        created_at=user["created_at"],
+        last_login=user["last_login"]
+    )
+
+@app.delete("/api/users/{user_id}")
+async def delete_existing_user(
+    user_id: str,
+    current_user=Depends(get_admin_dependency)
+):
+    """Delete (deactivate) a user (admin only)."""
+    user = await delete_user(db_pool, user_id)
+    return {"message": f"User {user['username']} has been deactivated"}
+
+@app.post("/api/users/{user_id}/reset-password")
+async def reset_password(
+    user_id: str,
+    new_password: str = Form(...),
+    current_user=Depends(get_admin_dependency)
+):
+    """Reset user password (admin only)."""
+    user = await reset_user_password(db_pool, user_id, new_password)
+    return {"message": f"Password reset for user {user['username']}"}
+
+@app.get("/api/auth/me", response_model=UserResponse)
+async def get_current_user_info(current_user=Depends(get_auth_dependency)):
+    """Get current user information."""
+    return UserResponse(
+        user_id=str(current_user["user_id"]),
+        username=current_user["username"],
+        email=current_user["email"],
+        role=current_user["role"],
+        is_active=current_user["is_active"],
+        created_at=current_user["created_at"],
+        last_login=current_user["last_login"]
+    )
+
 @app.post("/api/upload")
 async def upload_log(
     file: UploadFile,
     ticket_id: Optional[str] = Form(None),
     time_start: Optional[str] = Form(None),
-    time_end: Optional[str] = Form(None)
+    time_end: Optional[str] = Form(None),
+    current_user=Depends(get_auth_dependency)
 ):
     """Upload a log file for processing"""
     if not file.filename.endswith(('.tar.bz2', '.bz2', '.tar')):
@@ -132,7 +313,7 @@ async def upload_log(
     }
 
 @app.get("/api/sessions/{session_id}/status")
-async def get_session_status(session_id: str):
+async def get_session_status(session_id: str, current_user=Depends(get_auth_dependency)):
     """Get session processing status"""
     async with db_pool.acquire() as conn:
         result = await conn.fetchrow("""
@@ -145,7 +326,7 @@ async def get_session_status(session_id: str):
         return dict(result)
 
 @app.get("/api/sessions/{session_id}/data")
-async def get_bandwidth_data(session_id: str):
+async def get_bandwidth_data(session_id: str, current_user=Depends(get_auth_dependency)):
     """Get bandwidth data for a session"""
     async with db_pool.acquire() as conn:
         # For large datasets, sample the data to improve chart performance
@@ -286,7 +467,8 @@ async def get_bandwidth_data(session_id: str):
 async def merge_logs_endpoint(
     file: UploadFile,
     start_datetime: Optional[str] = Form(None),
-    end_datetime: Optional[str] = Form(None)
+    end_datetime: Optional[str] = Form(None),
+    current_user=Depends(get_auth_dependency)
 ):
     """Merge all messages.log files from uploaded archive into chronological order"""
     if not file.filename.endswith(('.tar.bz2', '.bz2', '.tar')):
@@ -328,7 +510,8 @@ async def merge_logs_endpoint(
 async def download_merged_logs(
     file: UploadFile,
     start_datetime: Optional[str] = Form(None),
-    end_datetime: Optional[str] = Form(None)
+    end_datetime: Optional[str] = Form(None),
+    current_user=Depends(get_auth_dependency)
 ):
     """Download merged messages.log files as plain text"""
     if not file.filename.endswith(('.tar.bz2', '.bz2', '.tar')):

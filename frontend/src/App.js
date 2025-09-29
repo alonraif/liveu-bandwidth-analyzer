@@ -1,8 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './App.css';
 import { BandwidthChart, AggregatedBandwidthChart, RTTChart, PacketLossChart } from './Charts';
+import Login from './Login';
+import UserManagement from './UserManagement';
 
 function App() {
+  // Authentication state
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [user, setUser] = useState(null);
+  const [token, setToken] = useState(null);
   const [file, setFile] = useState(null);
   const [sessionId, setSessionId] = useState(null);
   const [data, setData] = useState(null);
@@ -30,6 +36,82 @@ function App() {
   });
   const [timezone, setTimezone] = useState('UTC');
 
+  // Check for existing authentication on app load
+  useEffect(() => {
+    const storedToken = localStorage.getItem('token');
+    const storedUser = localStorage.getItem('user');
+
+    if (storedToken && storedUser) {
+      try {
+        const userData = JSON.parse(storedUser);
+        setToken(storedToken);
+        setUser(userData);
+        setIsAuthenticated(true);
+
+        // Validate token with server
+        validateToken(storedToken);
+      } catch (error) {
+        // Invalid stored data, clear it
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+      }
+    }
+  }, []);
+
+  const validateToken = async (authToken) => {
+    try {
+      const response = await fetch('/api/auth/me', {
+        headers: {
+          'Authorization': `Bearer ${authToken}`,
+        },
+      });
+
+      if (!response.ok) {
+        // Token is invalid, clear authentication
+        handleLogout();
+      }
+    } catch (error) {
+      // Network error or server unavailable
+      console.warn('Unable to validate token:', error);
+    }
+  };
+
+  const handleLogin = (userData, authToken) => {
+    setUser(userData);
+    setToken(authToken);
+    setIsAuthenticated(true);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setUser(null);
+    setToken(null);
+    setIsAuthenticated(false);
+
+    // Clear any session data
+    setFile(null);
+    setSessionId(null);
+    setData(null);
+    setLogMergerFile(null);
+    setMergeStatus(null);
+    setMergedLogContent(null);
+    setMergedLogMetadata(null);
+    setActiveTab('bandwidth');
+  };
+
+  // Add authorization header to all API calls
+  const makeAuthenticatedRequest = async (url, options = {}) => {
+    const authOptions = {
+      ...options,
+      headers: {
+        ...options.headers,
+        'Authorization': `Bearer ${token}`,
+      },
+    };
+    return fetch(url, authOptions);
+  };
+
   const handleUpload = async () => {
     const formData = new FormData();
     formData.append('file', file);
@@ -46,7 +128,7 @@ function App() {
     }
 
     try {
-      const res = await fetch('/api/upload', {
+      const res = await makeAuthenticatedRequest('/api/upload', {
         method: 'POST',
         body: formData
       });
@@ -60,9 +142,9 @@ function App() {
 
   const pollStatus = async (id) => {
     const interval = setInterval(async () => {
-      const res = await fetch(`/api/sessions/${id}/status`);
+      const res = await makeAuthenticatedRequest(`/api/sessions/${id}/status`);
       const status = await res.json();
-      
+
       if (status.status === 'completed') {
         clearInterval(interval);
         fetchData(id);
@@ -71,7 +153,7 @@ function App() {
   };
 
   const fetchData = async (id) => {
-    const res = await fetch(`/api/sessions/${id}/data`);
+    const res = await makeAuthenticatedRequest(`/api/sessions/${id}/data`);
     const result = await res.json();
     setData(result);
   };
@@ -95,7 +177,7 @@ function App() {
 
     try {
       setMergeStatus('processing');
-      const res = await fetch('/api/merge-logs', {
+      const res = await makeAuthenticatedRequest('/api/merge-logs', {
         method: 'POST',
         body: formData
       });
@@ -131,7 +213,7 @@ function App() {
     }
 
     try {
-      const res = await fetch('/api/merge-logs/download', {
+      const res = await makeAuthenticatedRequest('/api/merge-logs/download', {
         method: 'POST',
         body: formData
       });
@@ -250,7 +332,7 @@ function App() {
     }
 
     try {
-      const res = await fetch('/api/merge-logs/download', {
+      const res = await makeAuthenticatedRequest('/api/merge-logs/download', {
         method: 'POST',
         body: formData
       });
@@ -283,9 +365,23 @@ function App() {
     }
   };
 
+  // Show login screen if not authenticated
+  if (!isAuthenticated) {
+    return <Login onLogin={handleLogin} />;
+  }
+
   return (
     <div className="App">
-      <h1>LiveU Bandwidth Analyzer</h1>
+      <div className="app-header">
+        <h1>LiveU Bandwidth Analyzer</h1>
+        <div className="user-info">
+          <span className="welcome-text">Welcome, {user?.username}</span>
+          <span className={`role-badge ${user?.role}`}>{user?.role}</span>
+          <button onClick={handleLogout} className="logout-btn">
+            Logout
+          </button>
+        </div>
+      </div>
 
       <div className="tabs">
         <button
@@ -300,6 +396,14 @@ function App() {
         >
           Log Merger
         </button>
+        {user?.role === 'administrator' && (
+          <button
+            onClick={() => setActiveTab('users')}
+            className={activeTab === 'users' ? 'active' : ''}
+          >
+            User Management
+          </button>
+        )}
       </div>
 
       {activeTab === 'bandwidth' && (
@@ -687,6 +791,10 @@ function App() {
             </div>
           )}
         </div>
+      )}
+
+      {activeTab === 'users' && user?.role === 'administrator' && (
+        <UserManagement token={token} />
       )}
     </div>
   );
